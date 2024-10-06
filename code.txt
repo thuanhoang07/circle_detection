@@ -1,0 +1,619 @@
+=========================ver 1===============================
+import cv2
+import numpy as np
+import time
+import math
+
+# Mở camera
+cap = cv2.VideoCapture(0)
+
+# Định nghĩa dải màu vàng trong không gian HSV
+lower_yellow = np.array([20, 100, 100])
+upper_yellow = np.array([30, 255, 255])
+radius_real = 25
+
+# Danh sách để lưu trữ tọa độ của các hình tròn đã phát hiện (trung tâm)
+tracked_circles = []
+
+# Biến để theo dõi thời gian không phát hiện được hình tròn
+last_detection_time = time.time()
+
+# Sai số cho phép giữa hai tâm
+threshold_distance = 3  # Điều chỉnh giá trị này tùy theo yêu cầu
+
+while True:
+    # Đọc từng frame từ camera
+    ret, frame = cap.read()
+    if not ret:
+        break
+
+    # Lấy kích thước của khung hình để xác định tâm camera
+    frame_height, frame_width = frame.shape[:2]
+    center_camera = (frame_width // 2, frame_height // 2)
+
+    # Vẽ một chấm tại tâm của khung hình (tâm của camera)
+    cv2.circle(frame, center_camera, 5, (0, 255, 0), -1)
+
+    # Chuyển đổi khung hình từ không gian màu BGR sang HSV
+    hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+
+    # Tạo mặt nạ cho màu vàng
+    mask = cv2.inRange(hsv, lower_yellow, upper_yellow)
+
+    # Lọc ra chỉ những phần có màu vàng
+    yellow_objects = cv2.bitwise_and(frame, frame, mask=mask)
+
+    # Chuyển sang ảnh xám để phát hiện hình tròn
+    gray = cv2.cvtColor(yellow_objects, cv2.COLOR_BGR2GRAY)
+
+    # Làm mờ ảnh để giảm nhiễu
+    gray_blurred = cv2.GaussianBlur(gray, (9, 9), 2)
+
+    # Phát hiện hình tròn bằng HoughCircles
+    circles = cv2.HoughCircles(
+        gray_blurred,
+        cv2.HOUGH_GRADIENT, dp=1, minDist=50, param1=35, param2=30, minRadius=5, maxRadius=100
+    )
+
+    # Nếu tìm thấy hình tròn
+    if circles is not None:
+        circles = np.uint16(np.around(circles))
+        # Cập nhật danh sách tọa độ hình tròn đã phát hiện
+        tracked_circles = [(circle[0], circle[1], circle[2]) for circle in circles[0, :]]
+        # Cập nhật thời gian phát hiện cuối cùng
+        last_detection_time = time.time()
+    else:
+        # Kiểm tra nếu thời gian từ lần phát hiện cuối lớn hơn 0.5 giây
+        if time.time() - last_detection_time > 0.5:
+            tracked_circles = []  # Xóa tất cả các hình tròn nếu không phát hiện trong 0.5 giây
+
+    # Vẽ và theo dõi các hình tròn đã phát hiện
+    for i, (x, y, radius) in enumerate(tracked_circles):
+        # Vẽ đường tròn màu vàng xung quanh hình tròn được nhận diện
+        cv2.circle(frame, (x, y), radius, (0, 255, 255), 2)
+
+        # Vẽ một dấu chấm tại tâm hình tròn (đỏ)
+        cv2.circle(frame, (x, y), 1, (0, 0, 255), -1)
+
+        # Vẽ đường thẳng từ tâm của camera đến tâm của hình tròn
+        cv2.line(frame, center_camera, (x, y), (255, 0, 0), 1)
+
+        # Tính khoảng cách Euclidean giữa tâm camera và tâm hình tròn
+        distance = math.sqrt((center_camera[0] - x) ** 2 + (center_camera[1] - y) ** 2)
+
+        # Kiểm tra nếu khoảng cách nhỏ hơn hoặc bằng ngưỡng cho phép (threshold_distance)
+        # if distance <= threshold_distance:
+        #     cv2.putText(frame, "Match", (frame_width // 2 - 50, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 3)
+
+        # Hiển thị thông tin hình tròn (số thứ tự, tọa độ, bán kính) trên hình ảnh
+        text = f'Circle {i+1}: Center=({x}, {y}), Radius={radius}'
+        cv2.putText(frame, text, (10, 30 + i*30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+        cv2.putText(frame, text, (10, 30 + i*30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 0), 1)
+
+        # Tính khoảng cách Euclidean giữa tâm camera và tâm hình tròn
+        distance = math.sqrt((center_camera[0] - x) ** 2 + (center_camera[1] - y) ** 2)
+
+        # Hiển thị khoảng cách trên khung hình
+        distance_text = f'Distance to center: {int(distance)} px'
+        cv2.putText(frame, distance_text, (10, frame_height - 20), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+        cv2.putText(frame, distance_text, (10, frame_height - 20), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 0), 1)
+
+        if radius > 0:  # Tránh chia cho 0
+            distance_real = (radius_real * distance) / radius
+
+            # Hiển thị khoảng cách thực tế trên khung hình
+            distance_real_text = f'Distance to center (real): {int(distance_real)} cm'
+            cv2.putText(frame, distance_real_text, (10, frame_height - 50), cv2.FONT_HERSHEY_SIMPLEX, 0.7,(255, 255, 255), 2)
+            cv2.putText(frame, distance_real_text, (10, frame_height - 50), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 0), 1)
+
+            if distance_real <= threshold_distance:
+                cv2.putText(frame, "Match_real", (frame_width // 2 - 50, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 3)
+
+    # Hiển thị khung hình đã nhận diện và theo dõi hình tròn
+    cv2.imshow("Yellow Circle Tracking", frame)
+
+    # Nhấn 'ESC' để thoát
+    if cv2.waitKey(1) & 0xFF == 27:
+        break
+
+# Giải phóng camera và đóng cửa sổ hiển thị
+cap.release()
+cv2.destroyAllWindows()
+
+
+================ver 2========================
+import cv2
+import numpy as np
+import math
+import time
+
+# Mở camera
+cap = cv2.VideoCapture(0)
+
+# Định nghĩa dải màu vàng trong không gian HSV
+lower_yellow = np.array([20, 100, 100])
+upper_yellow = np.array([30, 255, 255])
+
+# Bán kính thực tế của đối tượng (giả định là 25cm)
+radius_real = 25
+
+# Biến theo dõi thời gian không phát hiện hình tròn
+last_detection_time = time.time()
+
+# Danh sách theo dõi các hình tròn
+tracked_circles = []
+
+# Ngưỡng khoảng cách cho phép
+threshold_distance = 3  # Điều chỉnh giá trị này tùy theo yêu cầu
+
+while True:
+    # Đọc từng frame từ camera
+    ret, frame = cap.read()
+    if not ret:
+        break
+
+    # Lấy kích thước của khung hình để xác định tâm camera
+    frame_height, frame_width = frame.shape[:2]
+    center_camera = (frame_width // 2, frame_height // 2)
+
+    # Vẽ một chấm tại tâm camera
+    cv2.circle(frame, center_camera, 5, (0, 255, 0), -1)
+
+    # Chuyển đổi từ không gian màu BGR sang HSV
+    hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+
+    # Tạo mặt nạ cho màu vàng
+    mask = cv2.inRange(hsv, lower_yellow, upper_yellow)
+
+    # Áp dụng mặt nạ lên khung hình để lọc màu vàng
+    yellow_objects = cv2.bitwise_and(frame, frame, mask=mask)
+
+    # Chuyển đổi sang ảnh xám để phát hiện hình tròn
+    gray = cv2.cvtColor(yellow_objects, cv2.COLOR_BGR2GRAY)
+    gray_blurred = cv2.GaussianBlur(gray, (9, 9), 2)
+
+    # Phát hiện hình tròn bằng phương pháp HoughCircles
+    circles = cv2.HoughCircles(
+        gray_blurred,
+        cv2.HOUGH_GRADIENT,
+        dp=1,
+        minDist=50,
+        param1=35,
+        param2=30,
+        minRadius=5,
+        maxRadius=100
+    )
+
+    # Nếu phát hiện hình tròn
+    if circles is not None:
+        circles = np.uint16(np.around(circles))
+        # Cập nhật danh sách các hình tròn đã theo dõi
+        tracked_circles = [(circle[0], circle[1], circle[2]) for circle in circles[0, :]]
+        # Cập nhật thời gian phát hiện cuối cùng
+        last_detection_time = time.time()
+    else:
+        # Xóa các hình tròn nếu không phát hiện trong 0.5 giây
+        if time.time() - last_detection_time > 0.5:
+            tracked_circles = []
+
+    # Duyệt qua các hình tròn đã phát hiện và vẽ chúng
+    for i, (x, y, radius) in enumerate(tracked_circles):
+        # Vẽ đường tròn màu vàng
+        cv2.circle(frame, (x, y), radius, (0, 255, 255), 2)
+        # Vẽ một chấm đỏ ở tâm hình tròn
+        cv2.circle(frame, (x, y), 1, (0, 0, 255), -1)
+        # Vẽ đường thẳng từ tâm camera đến tâm hình tròn
+        cv2.line(frame, center_camera, (x, y), (255, 0, 0), 2)
+
+        # Tính khoảng cách từ tâm camera đến hình tròn
+        distance = math.sqrt((center_camera[0] - x) ** 2 + (center_camera[1] - y) ** 2)
+
+        # Hiển thị thông tin hình tròn (tọa độ và bán kính)
+        info_text = f'Circle {i+1}: Center=({x}, {y}), Radius={radius}'
+        cv2.putText(frame, info_text, (10, 30 + i * 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+        cv2.putText(frame, info_text, (10, 30 + i * 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 0), 1)
+
+        # Hiển thị khoảng cách trên khung hình
+        distance_text = f'Distance to center: {int(distance)} px'
+        cv2.putText(frame, distance_text, (10, frame_height - 20), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+        cv2.putText(frame, distance_text, (10, frame_height - 20), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 0), 1)
+
+        if radius > 0:  # Tránh chia cho 0
+            distance_real = (radius_real * distance) / radius
+            # Hiển thị khoảng cách thực tế (cm)
+            real_distance_text = f'Distance to center (real): {int(distance_real)} cm'
+            cv2.putText(frame, real_distance_text, (10, frame_height - 50), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+            cv2.putText(frame, real_distance_text, (10, frame_height - 50), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 0), 1)
+
+            # Nếu khoảng cách thực tế <= ngưỡng cho phép thì đánh dấu
+            if distance_real <= threshold_distance:
+                cv2.putText(frame, "Match_real", (frame_width // 2 - 50, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 3)
+
+    # Hiển thị khung hình
+    cv2.imshow("Yellow Circle Tracking", frame)
+
+    # Nhấn 'ESC' để thoát
+    if cv2.waitKey(1) & 0xFF == 27:
+        break
+
+# Giải phóng tài nguyên
+cap.release()
+cv2.destroyAllWindows()
+
+
+=====================================ver 3============================ 3 màu ===============================================
+import cv2
+import numpy as np
+import math
+
+cap = cv2.VideoCapture(0)
+
+lower_blue = np.array([100, 150, 100])
+upper_blue = np.array([130, 255, 255])
+radius_real_blue = 35  # Bán kính
+
+lower_green = np.array([40, 100, 100])
+upper_green = np.array([70, 255, 255])
+radius_real_green = 50  # Bán kính
+
+lower_yellow = np.array([20, 100, 100])
+upper_yellow = np.array([30, 255, 255])
+radius_real_yellow = 25  # Bán kính
+
+detect_blue = True
+detect_green = False
+detect_yellow = False
+
+threshold_distance = 3
+
+while True:
+    ret, frame = cap.read()
+    if not ret:
+        break
+
+    frame_height, frame_width = frame.shape[:2]
+    center_camera = (frame_width // 2, frame_height // 2)
+
+    cv2.circle(frame, center_camera, 5, (0, 255, 0), -1)
+
+    hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+
+    if detect_blue:
+        mask_blue = cv2.inRange(hsv, lower_blue, upper_blue)
+
+        blue_objects = cv2.bitwise_and(frame, frame, mask=mask_blue)
+
+        gray_blue = cv2.cvtColor(blue_objects, cv2.COLOR_BGR2GRAY)
+
+        gray_blurred_blue = cv2.GaussianBlur(gray_blue, (9, 9), 2)
+
+        circles_blue = cv2.HoughCircles(
+            gray_blurred_blue,
+            cv2.HOUGH_GRADIENT, dp=1, minDist=50, param1=35, param2=30, minRadius=5, maxRadius=100
+        )
+
+        if circles_blue is not None:
+            circles_blue = np.uint16(np.around(circles_blue))
+            min_distance = float('inf')  # Khởi tạo khoảng cách nhỏ nhất
+            closest_circle_blue = None  # Hình tròn xanh dương gần nhất
+
+            for (x, y, radius) in circles_blue[0, :]:
+                distance = math.sqrt((center_camera[0] - x) ** 2 + (center_camera[1] - y) ** 2)
+
+                if distance < min_distance:
+                    min_distance = distance
+                    closest_circle_blue = (x, y, radius)
+
+            if closest_circle_blue is not None:
+                x, y, radius = closest_circle_blue
+
+                cv2.circle(frame, (x, y), radius, (255, 0, 0), 2)
+
+                cv2.circle(frame, (x, y), 1, (0, 0, 255), -1)
+
+                cv2.line(frame, center_camera, (x, y), (255, 0, 0), 1)
+
+                text = f'Blue Circle: Center=({x}, {y}), Radius={radius}'
+                cv2.putText(frame, text, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+                cv2.putText(frame, text, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 0), 1)
+
+                distance_text = f'Distance to center: {int(min_distance)} px'
+                cv2.putText(frame, distance_text, (10, frame_height - 20), cv2.FONT_HERSHEY_SIMPLEX, 0.7,
+                            (255, 255, 255), 2)
+                cv2.putText(frame, distance_text, (10, frame_height - 20), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 0), 1)
+
+                if radius > 0:
+                    distance_real = (radius_real_blue * min_distance) / radius
+                    distance_real_text = f'Distance to center (real): {int(distance_real)} cm'
+                    cv2.putText(frame, distance_real_text, (10, frame_height - 50), cv2.FONT_HERSHEY_SIMPLEX, 0.7,
+                                (255, 255, 255), 2)
+                    cv2.putText(frame, distance_real_text, (10, frame_height - 50), cv2.FONT_HERSHEY_SIMPLEX, 0.7,
+                                (0, 0, 0), 1)
+
+                    if distance_real <= threshold_distance:
+                        cv2.putText(frame, "Blue Match_real", (frame_width // 2 - 50, 50), cv2.FONT_HERSHEY_SIMPLEX, 1,
+                                    (0, 0, 255), 3)
+
+    elif detect_green:
+        mask_green = cv2.inRange(hsv, lower_green, upper_green)
+
+        green_objects = cv2.bitwise_and(frame, frame, mask=mask_green)
+
+        gray_green = cv2.cvtColor(green_objects, cv2.COLOR_BGR2GRAY)
+
+        gray_blurred_green = cv2.GaussianBlur(gray_green, (9, 9), 2)
+
+        circles_green = cv2.HoughCircles(
+            gray_blurred_green,
+            cv2.HOUGH_GRADIENT, dp=1, minDist=50, param1=35, param2=30, minRadius=5, maxRadius=100
+        )
+
+        if circles_green is not None:
+            circles_green = np.uint16(np.around(circles_green))
+            min_distance = float('inf')  # Khởi tạo khoảng cách nhỏ nhất
+            closest_circle_green = None  # Hình tròn xanh lá gần nhất
+
+            for (x, y, radius) in circles_green[0, :]:
+                distance = math.sqrt((center_camera[0] - x) ** 2 + (center_camera[1] - y) ** 2)
+
+                if distance < min_distance:
+                    min_distance = distance
+                    closest_circle_green = (x, y, radius)
+
+            if closest_circle_green is not None:
+                x, y, radius = closest_circle_green
+
+                cv2.circle(frame, (x, y), radius, (0, 255, 0), 2)
+
+                cv2.circle(frame, (x, y), 1, (0, 0, 255), -1)
+
+                cv2.line(frame, center_camera, (x, y), (0, 255, 0), 1)
+
+                text_green = f'Green Circle: Center=({x}, {y}), Radius={radius}'
+                cv2.putText(frame, text_green, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+                cv2.putText(frame, text_green, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 0), 1)
+
+                distance_text = f'Distance to center: {int(min_distance)} px'
+                cv2.putText(frame, distance_text, (10, frame_height - 20), cv2.FONT_HERSHEY_SIMPLEX, 0.7,
+                            (255, 255, 255), 2)
+                cv2.putText(frame, distance_text, (10, frame_height - 20), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 0), 1)
+
+                if radius > 0:  # Tránh chia cho 0
+                    distance_real = (radius_real_green * min_distance) / radius
+                    distance_real_text = f'Distance to center (real): {int(distance_real)} cm'
+                    cv2.putText(frame, distance_real_text, (10, frame_height - 50), cv2.FONT_HERSHEY_SIMPLEX, 0.7,
+                                (255, 255, 255), 2)
+                    cv2.putText(frame, distance_real_text, (10, frame_height - 50), cv2.FONT_HERSHEY_SIMPLEX, 0.7,
+                                (0, 0, 0), 1)
+
+                    if distance_real <= threshold_distance:
+                        cv2.putText(frame, "Green Match_real", (frame_width // 2 - 50, 50), cv2.FONT_HERSHEY_SIMPLEX, 1,
+                                    (0, 255, 0), 3)
+
+    elif detect_yellow:
+        mask_yellow = cv2.inRange(hsv, lower_yellow, upper_yellow)
+
+        yellow_objects = cv2.bitwise_and(frame, frame, mask=mask_yellow)
+
+        gray_yellow = cv2.cvtColor(yellow_objects, cv2.COLOR_BGR2GRAY)
+
+        gray_blurred_yellow = cv2.GaussianBlur(gray_yellow, (9, 9), 2)
+
+        circles_yellow = cv2.HoughCircles(
+            gray_blurred_yellow,
+            cv2.HOUGH_GRADIENT, dp=1, minDist=50, param1=35, param2=30, minRadius=5, maxRadius=100
+        )
+
+        if circles_yellow is not None:
+            circles_yellow = np.uint16(np.around(circles_yellow))
+            min_distance = float('inf')  # Khởi tạo khoảng cách nhỏ nhất
+            closest_circle_yellow = None  # Hình tròn vàng gần nhất
+
+            for (x, y, radius) in circles_yellow[0, :]:
+                distance = math.sqrt((center_camera[0] - x) ** 2 + (center_camera[1] - y) ** 2)
+
+                if distance < min_distance:
+                    min_distance = distance
+                    closest_circle_yellow = (x, y, radius)
+
+            if closest_circle_yellow is not None:
+                x, y, radius = closest_circle_yellow
+
+                cv2.circle(frame, (x, y), radius, (0, 255, 255), 2)
+
+                cv2.circle(frame, (x, y), 1, (0, 0, 255), -1)
+
+                cv2.line(frame, center_camera, (x, y), (0, 255, 255), 1)
+
+                text_yellow = f'Yellow Circle: Center=({x}, {y}), Radius={radius}'
+                cv2.putText(frame, text_yellow, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+                cv2.putText(frame, text_yellow, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 0), 1)
+
+                distance_text = f'Distance to center: {int(min_distance)} px'
+                cv2.putText(frame, distance_text, (10, frame_height - 20), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+                cv2.putText(frame, distance_text, (10, frame_height - 20), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 0), 1)
+
+                if radius > 0:  # Tránh chia cho 0
+                    distance_real = (radius_real_yellow * min_distance) / radius
+                    distance_real_text = f'Distance to center (real): {int(distance_real)} cm'
+                    cv2.putText(frame, distance_real_text, (10, frame_height - 50), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+                    cv2.putText(frame, distance_real_text, (10, frame_height - 50), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 0), 1)
+
+                    if distance_real <= threshold_distance:
+                        cv2.putText(frame, "Yellow Match_real", (frame_width // 2 - 50, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 255), 3)
+
+    cv2.imshow("Circle Tracking", frame)
+
+    # Nhấn phím 'x' để chuyển sang phát hiện màu xanh lá
+    key = cv2.waitKey(1) & 0xFF
+    if key == ord('x'):
+        detect_blue = False
+        detect_green = True
+        detect_yellow = False
+
+    # Nhấn phím 'z' để chuyển sang phát hiện màu xanh dương
+    if key == ord('z'):
+        detect_blue = True
+        detect_green = False
+        detect_yellow = False
+
+    # Nhấn phím 'c' để chuyển sang phát hiện màu vàng
+    if key == ord('c'):
+        detect_blue = False
+        detect_green = False
+        detect_yellow = True
+
+    # Nhấn 'ESC' để thoát
+    if key == 27:
+        break
+
+# Giải phóng camera và đóng cửa sổ hiển thị
+cap.release()
+cv2.destroyAllWindows()
+
+
+====================================lọc nhiễu chưa check===========
+import cv2
+import numpy as np
+import math
+
+class KalmanFilter:
+    def __init__(self, initial_x, initial_y):
+        # Create a Kalman filter with 4 dynamic parameters (x, y, delta_x, delta_y) and 2 measured (x, y)
+        self.kalman = cv2.KalmanFilter(4, 2)
+        self.kalman.measurementMatrix = np.array([[1, 0, 0, 0], [0, 1, 0, 0]], np.float32)
+        self.kalman.transitionMatrix = np.array([[1, 0, 1, 0], [0, 1, 0, 1], [0, 0, 1, 0], [0, 0, 0, 1]], np.float32)
+        self.kalman.processNoiseCov = np.array([[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 5, 0], [0, 0, 0, 5]], np.float32)
+        self.kalman.statePre = np.array([initial_x, initial_y, 0, 0], np.float32)
+
+    def update(self, x, y):
+        # Correct the Kalman filter with the measured values
+        measured = np.array([x, y], np.float32)
+        corrected = self.kalman.correct(measured)
+        # Predict the next position
+        predicted = self.kalman.predict()
+        return int(predicted[0]), int(predicted[1])
+
+class CircleDetector:
+    def __init__(self):
+        self.lower_blue = np.array([100, 150, 100])
+        self.upper_blue = np.array([130, 255, 255])
+        self.radius_real_blue = 35
+
+        self.lower_green = np.array([40, 100, 100])
+        self.upper_green = np.array([70, 255, 255])
+        self.radius_real_green = 50
+
+        self.lower_yellow = np.array([20, 100, 100])
+        self.upper_yellow = np.array([30, 255, 255])
+        self.radius_real_yellow = 25
+
+        self.threshold_distance = 3
+        self.kalman_filters = {}  # Stores Kalman filters for each color detected
+
+        self.cap = cv2.VideoCapture(0)
+
+    def process_frame(self):
+        ret, frame = self.cap.read()
+        if not ret:
+            return None, None
+
+        frame_height, frame_width = frame.shape[:2]
+        center_camera = (frame_width // 2, frame_height // 2)
+
+        cv2.circle(frame, center_camera, 5, (0, 255, 0), -1)
+
+        hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+
+        # Detect blue, green, and yellow circles
+        frame = self.detect_color(frame, hsv, self.lower_blue, self.upper_blue, center_camera,
+                                  self.radius_real_blue, (255, 0, 0), "Blue Circle", (0, 0, 255), 'blue')
+        frame = self.detect_color(frame, hsv, self.lower_green, self.upper_green, center_camera,
+                                  self.radius_real_green, (0, 255, 0), "Green Circle", (0, 0, 255), 'green')
+        frame = self.detect_color(frame, hsv, self.lower_yellow, self.upper_yellow, center_camera,
+                                  self.radius_real_yellow, (0, 255, 255), "Yellow Circle", (0, 0, 255), 'yellow')
+
+        return frame, ret
+
+    def detect_color(self, frame, hsv, lower_color, upper_color, center_camera, radius_real, circle_color, text_label, dot_color, color_name):
+        mask = cv2.inRange(hsv, lower_color, upper_color)
+        objects = cv2.bitwise_and(frame, frame, mask=mask)
+        gray = cv2.cvtColor(objects, cv2.COLOR_BGR2GRAY)
+        gray_blurred = cv2.GaussianBlur(gray, (9, 9), 2)
+
+        circles = cv2.HoughCircles(
+            gray_blurred,
+            cv2.HOUGH_GRADIENT, dp=1, minDist=50, param1=35, param2=30, minRadius=5, maxRadius=100
+        )
+
+        frame_height, frame_width = frame.shape[:2]
+
+        if circles is not None:
+            circles = np.uint16(np.around(circles))
+            min_distance = float('inf')
+            closest_circle = None
+
+            for (x, y, radius) in circles[0, :]:
+                distance = math.sqrt((center_camera[0] - x) ** 2 + (center_camera[1] - y) ** 2)
+
+                if distance < min_distance:
+                    min_distance = distance
+                    closest_circle = (x, y, radius)
+
+            if closest_circle is not None:
+                x, y, radius = closest_circle
+
+                # Use Kalman filter to predict and smooth the position
+                if color_name not in self.kalman_filters:
+                    self.kalman_filters[color_name] = KalmanFilter(x, y)
+
+                x, y = self.kalman_filters[color_name].update(x, y)
+
+                cv2.circle(frame, (x, y), radius, circle_color, 2)
+                cv2.circle(frame, (x, y), 1, dot_color, -1)
+                cv2.line(frame, center_camera, (x, y), circle_color, 1)
+
+                text = f'{text_label}: Center=({x}, {y}), Radius={radius}'
+                cv2.putText(frame, text, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+                cv2.putText(frame, text, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 0), 1)
+
+                distance_text = f'Distance to center: {int(min_distance)} px'
+                cv2.putText(frame, distance_text, (10, frame_height - 20), cv2.FONT_HERSHEY_SIMPLEX, 0.7,
+                            (255, 255, 255), 2)
+                cv2.putText(frame, distance_text, (10, frame_height - 20), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 0), 1)
+
+                if radius > 0:
+                    distance_real = (radius_real * min_distance) / radius
+                    distance_real_text = f'Distance to center (real): {int(distance_real)} cm'
+                    cv2.putText(frame, distance_real_text, (10, frame_height - 50), cv2.FONT_HERSHEY_SIMPLEX, 0.7,
+                                (255, 255, 255), 2)
+                    cv2.putText(frame, distance_real_text, (10, frame_height - 50), cv2.FONT_HERSHEY_SIMPLEX, 0.7,
+                                (0, 0, 0), 1)
+
+                    if distance_real <= self.threshold_distance:
+                        cv2.putText(frame, f"{text_label} Match_real", (frame_width // 2 - 50, 50), cv2.FONT_HERSHEY_SIMPLEX, 1,
+                                    circle_color, 3)
+
+        return frame
+
+    def release(self):
+        self.cap.release()
+        cv2.destroyAllWindows()
+
+def main():
+    detector = CircleDetector()
+
+    while True:
+        frame, ret = detector.process_frame()
+        if not ret:
+            break
+
+        cv2.imshow("Circle Tracking", frame)
+
+        if cv2.waitKey(1) & 0xFF == 27:  # ESC key to exit
+            break
+
+    detector.release()
+
+if __name__ == "__main__":
+    main()
