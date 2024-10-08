@@ -22,7 +22,7 @@ class ShapeDetector:
         # Lưu trữ trạng thái của hình elip/hình tròn
         self.last_detected_shapes = {'blue': None, 'green': None, 'yellow': None}
 
-        self.cap = cv2.VideoCapture(1)
+        self.cap = cv2.VideoCapture(0)
 
     def process_frame(self):
         ret, frame = self.cap.read()
