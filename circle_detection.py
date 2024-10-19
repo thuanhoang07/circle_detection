@@ -21,6 +21,7 @@ class ShapeDetector:
 
         # Lưu trữ trạng thái của hình elip/hình tròn
         self.last_detected_shapes = {'blue': None, 'green': None, 'yellow': None}
+        self.flag = False  # Biến cờ flag
 
         self.cap = cv2.VideoCapture(0)
 
@@ -34,6 +35,9 @@ class ShapeDetector:
 
         hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
 
+        # Reset flag trước khi kiểm tra các hình
+        self.flag = False
+
         # Detect blue, green, and yellow shapes without overwriting frame
         frame_blue = self.detect_color(frame.copy(), hsv, self.lower_blue, self.upper_blue, center_camera,
                                        self.radius_real_blue, (255, 0, 0), "Blue Ellipse", (0, 0, 255), 30,
@@ -45,6 +49,13 @@ class ShapeDetector:
                                            self.radius_real_yellow, (0, 255, 255), "Yellow Ellipse", (0, 0, 255), 90,
                                            frame_height - 100, 'yellow', "Yellow")
 
+        # Hiển thị flag lên màn hình
+        flag_text = f"Flag: {self.flag}"
+        cv2.putText(frame_combined, flag_text, (10, 40), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
+        cv2.putText(frame_combined, flag_text, (10, 40), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 0), 1)
+
+        print(flag_text)  # In trạng thái flag ra màn hình
+
         return frame_combined, ret
 
     def detect_color(self, frame, hsv, lower_color, upper_color, center_camera, radius_real, shape_color, text_label,
@@ -54,13 +65,11 @@ class ShapeDetector:
         gray = cv2.cvtColor(objects, cv2.COLOR_BGR2GRAY)
 
         # Morphological operations: Closing to fill gaps in detected shapes
-        kernel = np.ones((5, 5), np.uint8)  # Tạo kernel 5x5
-        closing = cv2.morphologyEx(gray, cv2.MORPH_CLOSE, kernel)  # Áp dụng phép closing
+        kernel = np.ones((5, 5), np.uint8)
+        closing = cv2.morphologyEx(gray, cv2.MORPH_CLOSE, kernel)
 
-        # Hiển thị kết quả của phép closing cho từng màu
         cv2.imshow(f"closing_{color_window_name}", closing)
 
-        # Phát hiện đường viền
         contours, _ = cv2.findContours(closing, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
 
         frame_height, frame_width = frame.shape[:2]
@@ -68,65 +77,53 @@ class ShapeDetector:
         closest_ellipse = None
 
         for contour in contours:
-            if len(contour) >= 5:  # Đảm bảo đủ điểm để fit elip
+            if len(contour) >= 5:
                 ellipse = cv2.fitEllipse(contour)
 
-                # Kiểm tra giá trị NaN trong elip trước khi xử lý tiếp
                 if np.isnan(ellipse[0][0]) or np.isnan(ellipse[0][1]):
                     continue
 
-                # Tính khoảng cách từ trung tâm camera đến trung tâm hình elip
                 center = (int(ellipse[0][0]), int(ellipse[0][1]))
                 distance = math.sqrt((center_camera[0] - center[0]) ** 2 + (center_camera[1] - center[1]) ** 2)
 
-                # Luôn phát hiện hình elip, ngay cả khi tâm màn hình nằm trong hình elip
                 min_distance = distance
                 closest_ellipse = ellipse
 
-        # Xử lý nếu phát hiện được hình elip
         if closest_ellipse is not None:
-            # Kiểm tra kích thước của hình elip trước khi vẽ
             if closest_ellipse[1][0] > 0 and closest_ellipse[1][1] > 0:
-                # Vẽ elip mà không vẽ tâm
                 cv2.ellipse(frame, closest_ellipse, shape_color, 2)
-
-                # Vẽ đường từ tâm màn hình đến tâm hình elip
                 center = (int(closest_ellipse[0][0]), int(closest_ellipse[0][1]))
-                cv2.line(frame, center_camera, center, (255, 255, 255), 2)  # Vẽ đường nối
+                cv2.line(frame, center_camera, center, (255, 255, 255), 2)
 
-                # Cập nhật trạng thái của hình đã phát hiện
                 self.last_detected_shapes[color_name] = closest_ellipse
 
-                # Hiển thị thông tin elip
                 text = f'{text_label}'
                 cv2.putText(frame, text, (10, y_offset), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
                 cv2.putText(frame, text, (10, y_offset), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 0), 1)
 
-                # Hiển thị thông tin khoảng cách
                 distance_text = f'{text_label} Distance to center: {int(min_distance)} px'
                 cv2.putText(frame, distance_text, (10, distance_y_offset), cv2.FONT_HERSHEY_SIMPLEX, 0.7,
                             (255, 255, 255), 2)
                 cv2.putText(frame, distance_text, (10, distance_y_offset), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 0), 1)
 
-                # Tính toán khoảng cách thật (giả sử hình tròn)
-                radius_real = max(closest_ellipse[1]) / 2  # Lấy bán kính lớn nhất của hình elip
+                radius_real = max(closest_ellipse[1]) / 2
                 if radius_real > 0:
                     distance_real = (radius_real * min_distance) / radius_real
 
-                    # Kiểm tra giá trị distance_real để đảm bảo hợp lệ
                     if not (np.isnan(distance_real) or distance_real <= 0):
                         distance_real_text = f'{text_label} Real distance: {int(distance_real)} cm'
-                        cv2.putText(frame, distance_real_text, (10, distance_y_offset - 20), cv2.FONT_HERSHEY_SIMPLEX, 0.7,
-                                    (255, 255, 255), 2)
-                        cv2.putText(frame, distance_real_text, (10, distance_y_offset - 20), cv2.FONT_HERSHEY_SIMPLEX, 0.7,
-                                    (0, 0, 0), 1)
+                        cv2.putText(frame, distance_real_text, (10, distance_y_offset - 20), cv2.FONT_HERSHEY_SIMPLEX,
+                                    0.7, (255, 255, 255), 2)
+                        cv2.putText(frame, distance_real_text, (10, distance_y_offset - 20), cv2.FONT_HERSHEY_SIMPLEX,
+                                    0.7, (0, 0, 0), 1)
 
                         if distance_real <= self.threshold_distance:
                             cv2.putText(frame, f"{text_label} Match_real", (frame_width // 2 - 50, y_offset),
                                         cv2.FONT_HERSHEY_SIMPLEX, 1, shape_color, 3)
 
+                # Đặt cờ flag thành True khi phát hiện hình elip
+                self.flag = True
         else:
-            # Xóa nét vẽ nếu không phát hiện được hình elip và cũng không có elip trước đó
             self.last_detected_shapes[color_name] = None
 
         return frame
