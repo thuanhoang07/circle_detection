@@ -36,18 +36,19 @@ class ShapeDetector:
         hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
 
         # Reset flag trước khi kiểm tra các hình
-        self.flag = False
+        self.flag = False  # Chỉ đặt lại cờ khi không phát hiện màu vàng
 
-        # Detect blue, green, and yellow shapes without overwriting frame
+        # Detect blue và green, nhưng không ảnh hưởng tới flag
         frame_blue = self.detect_color(frame.copy(), hsv, self.lower_blue, self.upper_blue, center_camera,
                                        self.radius_real_blue, (255, 0, 0), "Blue Ellipse", (0, 0, 255), 30,
-                                       frame_height - 20, 'blue', "Blue")
+                                       frame_height - 20, 'blue', "Blue", update_flag=False)
         frame_green = self.detect_color(frame_blue, hsv, self.lower_green, self.upper_green, center_camera,
                                         self.radius_real_green, (0, 255, 0), "Green Ellipse", (0, 0, 255), 60,
-                                        frame_height - 60, 'green', "Green")
+                                        frame_height - 60, 'green', "Green", update_flag=False)
+        # Phát hiện màu vàng và cập nhật flag
         frame_combined = self.detect_color(frame_green, hsv, self.lower_yellow, self.upper_yellow, center_camera,
                                            self.radius_real_yellow, (0, 255, 255), "Yellow Ellipse", (0, 0, 255), 90,
-                                           frame_height - 100, 'yellow', "Yellow")
+                                           frame_height - 100, 'yellow', "Yellow", update_flag=True)
 
         # Hiển thị flag lên màn hình
         flag_text = f"Flag: {self.flag}"
@@ -59,7 +60,7 @@ class ShapeDetector:
         return frame_combined, ret
 
     def detect_color(self, frame, hsv, lower_color, upper_color, center_camera, radius_real, shape_color, text_label,
-                     dot_color, y_offset, distance_y_offset, color_name, color_window_name):
+                     dot_color, y_offset, distance_y_offset, color_name, color_window_name, update_flag):
         mask = cv2.inRange(hsv, lower_color, upper_color)
         objects = cv2.bitwise_and(frame, frame, mask=mask)
         gray = cv2.cvtColor(objects, cv2.COLOR_BGR2GRAY)
@@ -67,8 +68,6 @@ class ShapeDetector:
         # Morphological operations: Closing to fill gaps in detected shapes
         kernel = np.ones((5, 5), np.uint8)
         closing = cv2.morphologyEx(gray, cv2.MORPH_CLOSE, kernel)
-
-        cv2.imshow(f"closing_{color_window_name}", closing)
 
         contours, _ = cv2.findContours(closing, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
 
@@ -121,8 +120,9 @@ class ShapeDetector:
                             cv2.putText(frame, f"{text_label} Match_real", (frame_width // 2 - 50, y_offset),
                                         cv2.FONT_HERSHEY_SIMPLEX, 1, shape_color, 3)
 
-                # Đặt cờ flag thành True khi phát hiện hình elip
-                self.flag = True
+                # Đặt cờ flag thành True khi phát hiện hình elip nếu màu vàng
+                if update_flag and color_name == 'yellow':
+                    self.flag = True
         else:
             self.last_detected_shapes[color_name] = None
 
